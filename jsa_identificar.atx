@@ -1,0 +1,37 @@
+input { string inRut; };
+output { integer ouErrCode; string ouErrDesc, ouNombres, ouSexo, ouFecNac; };
+
+global [client]
+{
+	string lsMsg;
+};
+
+procedure main ()
+begin
+
+	% inicializa variables
+	Sys.erc = 0;
+	Sys.ercText = "";
+	ouErrCode =  Sys.erc;
+	ouErrDesc = Sys.ercText;
+
+	% Datos a verificar
+	User.Pais = Sesion.Pais;
+	User.Rut = RutEditado(inRut);
+	User.Institucion = Sesion.Institucion;
+	User.Verificar();
+	
+	% Si hubo un error
+	if ( Sys.erc <> 0 ) then begin
+		ouErrCode =  Sys.erc;
+		ouErrDesc = Sys.ercText;
+		return;
+	end;
+
+	% Obtener los datos del Rut
+	Sys.WSConsulta();
+	ouNombres = User.Nombre;
+	ouSexo = User.Sexo;
+	ouFecNac = User.FechaNac;	
+	
+end;

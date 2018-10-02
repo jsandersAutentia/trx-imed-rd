@@ -1,0 +1,238 @@
+input { string inRut, inPais, inTipoId, inId; };
+output { integer ouErrCode; string ouErrDesc, ouAuditoria; };
+
+global [client]
+{
+	% Variables asociadas a la Auditorá y Log de la transacción
+	string lsOrigen, lsVersion, lsTipoOperacion, lsFrase, lsNombreCompleto, lsDedo;
+	integer lnErcVerifica, lnItera, lnAncho, lnAlto, lnFlags, lnTolerancia, lnMayor65;
+	
+	resource lrBmp_ack		= "./images/bmp-ack.bmp";
+	resource lrBmp_nak		= "./images/bmp-nak.bmp";
+	resource lrBmp_quest	= "./images/bmp-quest.bmp";
+	resource lrBmp_vacio	= "./images/bmp-vacio.bmp";
+	resource lrBmp_top		= "./images/TOP.jpg";
+	
+	blob lbBmpHuella, lbPatron, wsqHuella, wsqHuellaInversa;
+};
+
+% Archivos a incluir
+#include "jsa_audita_log.atx"
+
+% Diálogo para verificar
+Dialog DlgVerificar
+{
+	At 10:20;
+	Palette{00:   0,   0,   0;
+			01: 255, 255, 255;
+			03: 255, 204, 102;
+			02: 170, 046,  63;
+			04: 0x31, 0x4A, 0x83;	%--> azul oscuro
+			05: 0x3D, 0x5E, 0xA5;	%--> azul claro
+	};
+
+	Font "MS Sans Serif", size 0*8;
+	Title "Verificación de huella [SAE]";
+	Background 5 (395) 4;
+	Size 408*302;	%Tamaño en versión estable de autetnia IMED-RD
+
+	Picture picTop , at 0:0;
+	Picture picHuella, at 270:47, size 128*128, style border;
+	Font "MS Sans Serif", size 0*16, Bold;
+
+	Label labRut="",    at 7:55, size 248*11;
+	Label labNombre="", at 7:71, size 249*26;
+
+	Picture $IDB_Raya, at 7:99;
+	Font "Arial", size 0*20, Bold;
+	Label labMsg="", at 7:112, size 250*30;
+	Font "Lucida Console", size 0*11;
+	Label labFrase="", at 7:150, size 250*120;
+
+	Picture Tick1 = $IDB_Quest, at 306:246;
+	Picture Tick2 = $IDB_Vacio, at 323:246;
+	Picture Tick3 = $IDB_Vacio, at 340:246;
+	Picture Tick4 = $IDB_Vacio, at 357:246;
+
+	% Control para seleccionar el dedo a verificar
+	Control "PutDedo", at 293:188;
+	
+	Button Cancelar, at 100:280, size 50*14, Cancel, 
+	On Click
+	begin
+		Sys.erc = 201;
+		Sys.ercDetail = 201;
+		Sys.ercText = "Operacion cancelada";
+		EndDialog(1);
+	end;
+
+	On Sensor.Touch:
+	begin
+		picHuella = NULL;
+		labMsg = "capturando...";
+		
+		if        	(lnItera = 0) then Tick1 = lrBmp_quest
+		else if 	(lnItera = 1) then Tick2 = lrBmp_quest
+		else if 	(lnItera = 2) then Tick3 = lrBmp_quest
+		else                             	 Tick4 = lrBmp_quest;
+	end;
+
+	On Init:
+	begin
+		picTop = BMP(lrBmp_top);
+		lnAncho = 500;
+		lnAlto  = 550;
+		lnFlags = 0;
+		
+		lsFrase ="Al colocar el dedo sobre el lector de huellas autorizo expresamente a Autentia para enrolar y almacenar en sus registros mis datos personales: Nombre, Identidad, fecha de nacimiento, género y";
+		lsFrase = lsFrase," patrón de huella dactilar*, y a cotejar esos datos contra aquellos que ya estén almacenados en dichos registros con la finalidad de verificar mi identidad. Dichos datos no serán comunicados a terceros. Si deseo que mis datos personales sean bloqueados y";
+		lsFrase = lsFrase,"eliminados o cualquier solicitud en relación a dichos registros, deberé comunicarlo a Autentia, a través de carta dirigida a Av. 11 de Septiembre 1901, 3er piso o al correo electrónico: solicitud@autentia.cl.";
+		lsFrase = lsFrase," *El patrón de huella dactilar es una representación matemática de los puntos característicos de una huella dactilar.";
+		labFrase = lsFrase;
+
+		% Labels con el RUT y Nombre
+		labRut = inId,": ",inTipoId;
+		labNombre = "Sr", if (User.Sexo = "Femenino") then "(it)a" else ""," : ", lsNombreCompleto;
+
+		% Tolerancia para el sensor
+		if ((lnTolerancia <> 21) and (lnTolerancia <> 0))  then
+			Sensor.Tolerancia = lnTolerancia; 
+
+		Sensor.Open();
+		Sensor.Subscribe ();
+		Sensor.LoadPatron ();
+		
+		labMsg = "Por favor, coloque ",if (User.nDedos < 2)
+					     then ["el ",User.Dedo.id]
+					     else "alguno de los dedos coloreados",
+					     " en el LECTOR",if(lnTolerancia = 21) then "." else " ";
+
+		lnItera = 0;
+	end;
+
+	On Sensor.Sample:
+	begin
+		Sensor.GetBmp (lbBmpHuella,137,172);
+		picHuella = BMP (lbBmpHuella);
+
+		Sensor.GetVerTemplate ();
+
+		if (Sys.erc = 0) then
+		begin
+			Sensor.GetPreTemplate ();
+		end;
+
+		lnItera++;
+
+		if (Sys.erc <> 0) then
+		begin
+			Beep (0x10);
+			labMsg = "No se puede obtener huella.",LF,"Por favor, reintente";
+			if         (lnItera = 1) then begin Tick1 = lrBmp_nak; Tick2 = lrBmp_quest; end
+			else if (lnItera = 2) then begin Tick2 = lrBmp_nak; Tick3 = lrBmp_quest; end
+			else if (lnItera = 3) then begin Tick3 = lrBmp_nak; Tick4 = lrBmp_quest; end
+			else 										  Tick4 = lrBmp_nak;
+			
+			if (lnItera >= 4) then
+			begin
+				Sys.ercText = "Demasiados intentos";
+				EndDialog (2);
+			end;
+			return;
+		end;
+
+		if			(lnItera = 1)	then Sensor.Tolerancia = 100
+		else if	(lnItera = 2) then Sensor.Tolerancia = 400
+		else if	(lnItera= 3) 	then Sensor.Tolerancia = 700
+		else 								Sensor.Tolerancia = 1000;
+		
+		Sensor.Verify (lsDedo);
+		
+		if (Sys.erc <> 0) then
+		begin
+			Beep (0x10);
+			if (lnItera >= 4) then
+			begin
+				Sys.ercText = "Demasiados intentos";
+				EndDialog (2);
+			end;
+
+			User.Dedo = integer (lsDedo);
+			labMsg = "RECHAZADO",LF,"Por favor, reintente";
+
+			if			(lnItera = 1)	then begin	Tick1 = lrBmp_nak; Tick2 = lrBmp_quest; end
+			else if	(lnItera = 2)	then begin	Tick2 = lrBmp_nak; Tick3 = lrBmp_quest; end
+			else if	(lnItera = 3)	then begin	Tick3 = lrBmp_nak; Tick4 = lrBmp_quest; end
+			else 											Tick4 = lrBmp_nak;
+			
+			return;
+		end;
+
+		if ((Sys.erc = 0) and (lnItera > 3)) then
+		begin
+			Sensor.GetPatron(null, lbPatron);
+		end;
+		
+		Beep (0x30);
+		
+		User.Dedo = integer (lsDedo);
+		
+		labMsg = User.Dedo.id," aprobado.",LF,"Puntaje: ",string(Sensor.Puntaje);
+		if			(lnItera = 1) then	Tick1 = lrBmp_ack
+		else if	(lnItera = 2) then	Tick2 = lrBmp_ack
+		else if	(lnItera = 3) then	Tick3 = lrBmp_ack
+		else										Tick4 = lrBmp_ack;
+		
+		Sensor.GetWsq (wsqHuella,lnAncho,lnAlto,1-lnFlags);
+		Sensor.GetWsq (wsqHuellaInversa,lnAncho,lnAlto,lnFlags);
+		User.Dedo.Huella = picture(wsqHuellaInversa);
+		
+		EndDialog (0);
+	
+	end;
+};
+
+
+procedure main ()
+begin
+
+	% inicializa variables
+	lsOrigen = "IMRD/jsa_verificar";
+	lsVersion = "1.0";
+	lsTipoOperacion = "VIdentidad";
+	lnErcVerifica = -1; % Código de Error de Rechazo
+	
+	Sys.erc = 0;
+	Sys.ercText = NULL;
+	ouErrCode =  Sys.erc;
+	ouErrDesc = Sys.ercText;
+
+	% Datos a verificar
+	User.Pais = inPais;
+	User.Rut = inRut;
+	User.Institucion = Sesion.Institucion;
+	
+	% Consultar quién es
+	Sys.WSConsulta();
+	lsNombreCompleto = User.Nombre;
+	
+	% Capturar huella
+	Sys.Erc = Dialog (DlgVerificar);
+
+	% Auditoría
+	Audita();
+	
+	% Log
+	Log();
+	
+	ouAuditoria = Audit.Key;
+	
+	% Si hubo un error
+	if ( Sys.erc <> 0 ) then begin
+		%lnErcVerifica = Sys.erc; 
+		ouErrCode =  Sys.erc;
+		ouErrDesc = Sys.ercText;
+		return;
+	end;
+	
+end;

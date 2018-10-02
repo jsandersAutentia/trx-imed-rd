@@ -1,0 +1,65 @@
+%===================================================%
+%
+% Transacción: jsa_agrega_identidad_rut.atx
+% Autor			: Jorge F. Sanders A.
+% Fecha		: 22/02/2018 - 16:30
+% Propósito	: Procedimiento que agrega identidades a la ya 
+%					  existente, asociada al RUT y País en la 
+%					  tabla TIdentidad.
+%
+%===================================================%
+
+% Parámetros de Entrada y Salida
+input { string inRUT, inPais, inCI, inSS, inEmpresa; };
+output { integer ouErrCode; string ouErrDesc, ouAuditoria; };
+
+global [shared]
+{
+	string shsSQL;
+};
+
+procedure [server] AddIdentidad()
+begin
+
+	% Conectarse al BB.DD.
+	Server.erc = -1;
+	Server.ercText = "Error presunto";
+	Sql [0] Open "autentia" at "base.autentia.cl" as "autentia/_voyager.";
+	
+	% Ejecutar comando SQL
+	if (Server.erc = 0) then
+		Sql [0] shsSQL;
+
+	% Cerrar
+	Sql [0] CLOSE;
+
+end;
+
+procedure main()
+begin
+	
+	% Inicializa control de errores
+	ouErrCode = 0;
+	ouErrDesc = "Identidad(es) agregada(s) exitosamente";
+	ouAuditoria = "Sin auditoria por el momento";
+	
+	% Viene Cédula de Identidad?
+	if  (inCI <> "") then begin
+		shsSQL =  "INSERT INTO TIdentidad SET NroDocto = '", inCI, "', Pais = '", inPais, "', TipoDocto = 'CI', RUT = '", inRUT, "', Empresa = '", inEmpresa, "';";
+		AddIdentidad();
+	end;
+
+	% Viene N° de Seguro Social?
+	if (inSS <> "") then begin
+		shsSQL =  "INSERT INTO TIdentidad SET NroDocto = '", inSS, "', Pais = '", inPais, "', TipoDocto = 'SS', RUT = '", inRUT, "', Empresa = '", inEmpresa, "';";
+		AddIdentidad();
+	end;
+	
+	if (Server.erc <> 0) then begin
+		ouErrCode = Server.erc;
+		ouErrDesc = Server.ercText;
+	end;
+	
+end;
+
+

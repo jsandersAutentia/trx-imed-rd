@@ -1,0 +1,395 @@
+%===================================================%
+%
+% Transacción	: jsa_reenrolar_rd.atx
+% Autor			: Jorge F. Sanders A.
+% Fecha			: 13/09/2018 - 10:48
+% Propósito		: Procedimiento para re-enrolar dedos
+%
+%===================================================%
+
+% Parámetros de Entrada y Salida
+input { string inRut, inPais, inFechaNac, inCedula; };
+output { integer ouErrCode; string ouErrDesc, ouAuditoria; };
+
+
+global [client]
+{
+	string lsDV, lsRut, lsReEnrolado, lsNombreDedo, lsRevisarDedos, lsDedo;
+	integer liLargo, liDedo, liErrCodeEnrola, liItera, liPatron, liAncho, liAlto, liFlags, liK;
+	blob lbBmpHuella, lbPatronEnro, lbWsqHuellaEnro, lbWsqHuellaInversaEnro, lbWsqHuellaInversa;
+	
+	resource lrBmp_ack			 = "./images/bmp-ack.bmp";
+	resource lrBmp_nak		 	 = "./images/bmp-nak.bmp";
+	resource lrBmp_quest		 = "./images/bmp-quest.bmp";
+	resource lrBmp_vacio		 = "./images/bmp-vacio.bmp";
+	resource lrBmp_top			 = "./images/TOP.jpg";
+	resource lrBmp_mano_izq	 = "./dedos/000 mano izquierda.gif";
+	resource lrBmp_mano_der = "./dedos/000 mano derecha.gif";
+	resource lrBmp_dedo_0	 = "./dedos/001 pulgar derecho.gif";
+	resource lrBmp_dedo_1	 = "./dedos/002 indice derecho.gif";
+	resource lrBmp_dedo_2	 = "./dedos/003 medio derecho.gif";
+	resource lrBmp_dedo_3	 = "./dedos/004 anular derecho.gif";
+	resource lrBmp_dedo_4	 = "./dedos/005 menique derecho.gif";
+	resource lrBmp_dedo_5	 = "./dedos/006 pulgar izquierdo.gif";
+	resource lrBmp_dedo_6	 = "./dedos/007 indice izquierdo.gif";
+	resource lrBmp_dedo_7	 = "./dedos/008 medio izquierdo.gif";
+	resource lrBmp_dedo_8	 = "./dedos/009 anular izquierdo.gif";
+	resource lrBmp_dedo_9	 = "./dedos/010 menique izquierdo.gif";
+	
+};
+
+global [shared]
+{
+	string ssRut, ssPais;
+	integer siDedo;
+	blob sbPatron, sbWsqHuellaEnro;
+};
+
+procedure [server] GrabaAuditoria()
+begin
+	Audit.Write ();
+end;
+
+procedure [server] GrabaLog()
+begin
+	Log.Write ();
+end;
+
+% Auditoria
+procedure [client] Audita()
+begin
+	Audit.Init ();
+	Audit.Origen			= "jsa_reenrolar_rd";
+	Audit.Resultado	= string(Sys.erc "%.004d");
+	Audit.Descripcion	= "Rut: ",User.Rut;
+	Audit.Version		= "1.0";
+	Audit.AddField("Rut", User.Rut);
+	Audit.AddField("Nombre", User.Nombre );
+	Audit.AddField("ReEnrolado",lsReEnrolado);
+	Audit.AddField("Dedo.Fecha", User.Dedo.Fecha);
+	Audit.AddField("Dedo.inx", User.Dedo.inx);
+	Audit.AddField("Dedo.id", User.Dedo.id);
+	Audit.AddField("Dedo.Enrolador",User.Dedo.Enrolador.Institucion);
+	Audit.AddField("Dedo.Patron", User.Dedo.Patron); 
+	Audit.AddField("Dedo.wsq", lbWsqHuellaEnro); 
+	Audit.AddField("NombreOper",Sesion.NombreOper);
+	Audit.AddField("Firma.cedula",lsRut);
+	Sys.DateTime = DateTime(1);
+	GrabaAuditoria();
+end;
+
+% Log
+procedure [client] Log()
+begin
+	Log.Pais = User.Pais;
+	Log.Rut = User.Rut;
+	Log.TipoOperacion = "reenrolar_rd";
+	Log.Institucion = Sesion.Institucion;	
+	if (lsReEnrolado = "RE-ENROLADO") then
+		Log.Resultado = "OK"
+	else
+		Log.Resultado = "Fallido";
+	Log.Descripcion = lsReEnrolado, " | ";
+	Log.Descripcion = Log.Descripcion," | Dedo: ",User.Dedo.id;
+	Log.Descripcion = Log.Descripcion," | AuditKey: ",Audit.Key;
+	Log.Descripcion = Log.Descripcion," | Lugar recibido: IMRD";
+	Log.Descripcion = Log.Descripcion," | Lugar sesion: ", Sesion.Ubicacion;
+	GrabaLog ();
+end;
+
+procedure [Server] ReEnrolarDedo()
+begin
+	TDedos.Pais				= ssPais;
+	TDedos.Rut				= ssRut;
+	TDedos.Institucion	= Sesion.Institucion;
+	TDedos.Tecnologia	= "UAREU-gold";
+	TDedos.Fecha			= DateTime(1);
+	TDedos.Dedo			= siDedo;
+	TDedos.Patron			= sbPatron;
+	TDedos.Vigente        = TRUE;
+	TDedos.TieneWSQ	= TRUE;
+	TDedos.Insert();
+end;
+
+% Diálogo para enrolar
+Dialog DlgEnrolar
+{
+	At 10:20;
+	Palette{00:   0,   0,   0;
+			01: 255, 255, 255;
+			03: 255, 204, 102;
+			02: 170, 046,  63;
+			04: 0x31, 0x4A, 0x83;	%--> azul oscuro
+			05: 0x3D, 0x5E, 0xA5;	%--> azul claro
+	};
+
+	Font "MS Sans Serif", size 0*8;
+	Title "Re-Enrolamiento de huella [SAE]";
+	Background 5 (395) 4;
+	Size 408*262;	%Tamaño en versión estable de autentia
+
+	Picture picTop , at 0:0;
+	Picture picHuella, at 270:57, size 128*128, style border;
+	Font "MS Sans Serif", size 0*16, Bold;
+	Label labRut="",    at 7:55, size 248*13;
+	Label labNombre="", at 7:71, size 249*26;
+	Picture $IDB_Raya, at 7:99;
+	Font "Arial", size 0*20, Bold;
+	Label labMsg="", at 7:112, size 250*30;
+	Font "Lucida Console", size 0*11;
+	Label labFrase="", at 7:150, size 250*100;
+
+	Picture Tick1 = $IDB_Quest, at 306:246;
+	Picture Tick2 = $IDB_Vacio, at 323:246;
+	Picture Tick3 = $IDB_Vacio, at 340:246;
+	Picture Tick4 = $IDB_Vacio, at 357:246;
+	Picture Tick5, at 354:246, Hide;
+
+	Picture Mano0, at 294:188;
+	Picture Mano1, at 336:188;
+	
+	Control "GetDedo" TO liDedo, at 283:188;
+
+	Button Cancelar, at 61:244, size 50*14, Cancel, 
+	On Click
+	begin
+		Sys.erc = 201;
+		Sys.ercDetail = 201;
+		Sys.ercText = "Operacion cancelada";
+		liErrCodeEnrola = 201;
+		EndDialog(1);
+	end;
+
+	On Sensor.Touch:
+	begin
+		picHuella = NULL;
+		labMsg = "capturando...";
+		
+		if        	(liItera = 0) then Tick1 = lrBmp_quest
+		else if 	(liItera = 1) then Tick2 = lrBmp_quest
+		else if 	(liItera = 2) then Tick3 = lrBmp_quest
+		else                             	Tick4 = lrBmp_quest;
+	end;
+
+	On Init:
+	begin
+		picTop = BMP(lrBmp_top);
+		
+		% Enrolar Mano derecha (mano izquierda en blanco)
+		if (liDedo = 0) then begin Mano0 = lrBmp_mano_izq; Mano1 = lrBmp_dedo_0; end;
+		if (liDedo = 1) then begin Mano0 = lrBmp_mano_izq; Mano1 = lrBmp_dedo_1; end;
+		if (liDedo = 2) then begin Mano0 = lrBmp_mano_izq; Mano1 = lrBmp_dedo_2; end;
+		if (liDedo = 3) then begin Mano0 = lrBmp_mano_izq; Mano1 = lrBmp_dedo_3; end;
+		if (liDedo = 4) then begin Mano0 = lrBmp_mano_izq; Mano1 = lrBmp_dedo_4; end;
+		
+		% Enrolar Mano izquierda (mano derecha en blanco)
+		if (liDedo = 5) then begin Mano1 = lrBmp_mano_der; Mano0 = lrBmp_dedo_5; end;
+		if (liDedo = 6) then begin Mano1 = lrBmp_mano_der; Mano0 = lrBmp_dedo_6; end;
+		if (liDedo = 7) then begin Mano1 = lrBmp_mano_der; Mano0 = lrBmp_dedo_7; end;
+		if (liDedo = 8) then begin Mano1 = lrBmp_mano_der; Mano0 = lrBmp_dedo_8; end;
+		if (liDedo = 9) then begin Mano1 = lrBmp_mano_der; Mano0 = lrBmp_dedo_9; end;
+
+		liAncho = 500;
+		liAlto  = 550;
+		liFlags = 0;
+		liErrCodeEnrola = 0;
+
+		% Labels con el RUT y Nombre
+		labRut = "C.I.: ",inCedula;
+		labNombre = "Sr", if (User.Sexo = "Femenino") then "(it)a" else ""," : ", User.Nombre;
+
+		Sensor.Open();
+		Sensor.Subscribe ();
+		Sensor.LoadPatron ();
+		
+		% Cargar dedo a revisar
+		if        	(liDedo = 0) then lsNombreDedo = "PULGAR DERECHO"
+		else if 	(liDedo = 1) then lsNombreDedo = "INDICE DERECHO"
+		else if 	(liDedo = 2) then lsNombreDedo = "MEDIO DERECHO"
+		else if 	(liDedo = 3) then lsNombreDedo = "ANULAR DERECHO"
+		else if 	(liDedo = 4) then lsNombreDedo = "MEÑIQUE DERECHO"
+		else if 	(liDedo = 5) then lsNombreDedo = "PULGAR IZQUIERDO"
+		else if 	(liDedo = 6) then lsNombreDedo = "INDICE IZQUIERDO"
+		else if 	(liDedo = 7) then lsNombreDedo = "MEDIO IZQUIERDO"
+		else if 	(liDedo = 8) then lsNombreDedo = "ANULAR IZQUIERDO"
+		else if 	(liDedo = 9) then lsNombreDedo = "MEÑIQUE IZQUIERDO";
+		
+		labMsg = "Por favor, coloque CUATRO VECES el dedo ", lsNombreDedo, " sobre el lector.";
+
+		liItera = 0;
+		liPatron = 0;
+	end;
+
+	On Sensor.Sample:
+	begin
+		Beep(0);
+
+		Sensor.GetBmp ( lbBmpHuella, 200, 200 );
+		picHuella = BMP (lbBmpHuella);
+
+		Sensor.GetWsq (lbWsqHuellaEnro,liAlto,liAncho,1);
+		Sensor.GetWsq (lbWsqHuellaInversaEnro,liAlto,liAncho,1);
+		User.Dedo.Huella = picture(lbWsqHuellaInversa);
+		
+		Sys.ercText = "";
+		Sys.erc = 0;
+		
+		Sensor.GetVerTemplate ();
+		%--> Beep:	0    default
+		%-->		0x10 ICONHAND
+		%-->		0x20 ICONQUESTION
+		%-->		0x30 ICONEXCLAMATION
+		%-->		0x40 ICONASTERISK
+		
+		liK = 0x30;
+		
+		if (Sys.erc = 0) then
+		begin
+			% GetPatron
+			Sensor.GetPreTemplate ();
+			liK = 0x40;
+		end;
+
+		
+		if (Sys.Erc <> 0) Then
+		Begin
+			labMsg = "Error al validar huella :: ", string(Sys.Erc);
+			liK = 0x30;
+			Beep (liK);
+			if      	(liItera = 0) then 	Tick1 = lrBmp_nak
+			else if 	(liItera = 1) then 	Tick2 = lrBmp_nak
+			else if 	(liItera = 2) then 	Tick3 = lrBmp_nak
+			else if 	(liItera = 3) then 	Tick4 = lrBmp_nak
+			else                       				Tick5 = lrBmp_nak;
+			return; 
+		End;	
+
+		liItera++;
+		
+		% Variable bDedo es externa e indica el dedo que se escanea lsNombreDedo
+		labMsg = "Muestra ", string(liItera), " OK, dedo ", lsNombreDedo;
+		if (liItera <= 4) then
+		Begin
+
+			% Cargar dedo
+			lsRevisarDedos = string(liDedo);
+			Sys.WSConsulta();
+			Sensor.LoadPatron ();
+
+			% Revisa si el dedo ingresado ya existe	
+			lsDedo = string(liDedo); 
+			Sensor.Verify (lsDedo);
+
+			% Si el dedo se acepta, significa que ya está enrolado
+			if ( Sys.erc = 0 ) then begin				
+				% Si es un dedo distinto al que se está queriendo enrolar, se rechaza el dedo
+				% En sDedo viene como string el número del dedo que hizo match
+				User.Dedo = liDedo;
+				%MsgBox "Hizo match ", string(User.Dedo.inx), " ", User.Dedo.id;
+
+				if (User.Dedo.inx <> liDedo) then
+				begin
+					MsgBox "El dedo ingresado ya fue enrolado "; %, string(User.Dedo.inx), " ", User.Dedo.id;
+					Sys.erc = 1025;
+					Sys.ercDetail = 1025;
+					Sys.ercText = "Dedo ya enrolado";
+					liErrCodeEnrola = 1025;
+					EndDialog (1);
+				end;
+			end;
+		end;
+	
+		if        	(liItera = 1) then begin 	Tick1 = lrBmp_ack; Tick2 = lrBmp_quest; end
+		else if	(liItera = 2) then begin 	Tick2 = lrBmp_ack; Tick3 = lrBmp_quest; end
+		else if 	(liItera = 3) then begin 	Tick3 = lrBmp_ack; Tick4 = lrBmp_quest; end
+		else                                      		Tick4 = lrBmp_ack;
+		
+		if (liItera < 4) then
+		begin
+			Sensor.Subscribe ();
+			return;
+		end;
+
+		% Esta ultima parte ocurre sólo cuando i=4, o sea cuando
+		% se tienen 4 muestras, suficientes para obtener un patrón
+		labMsg = labMsg, LF, "Obteniendo patron #", string(liPatron + 1), "...";
+
+		Sensor.GetPatron (null, lbPatronEnro);
+		
+		if (Sys.erc <> 0) then
+		begin
+			Beep (0x10);
+			% Indicar que hubo un error a través de la variable liErrCodeEnrola
+			liErrCodeEnrola = 1;
+			EndDialog(1);
+			return;
+		end;
+
+		Sensor.GetWsq (lbWsqHuellaEnro, liAncho, liAlto, 1 - liFlags);
+		Sensor.GetWsq (lbWsqHuellaInversaEnro, liAncho, liAlto, liFlags);
+		User.Dedo.Huella = picture(lbWsqHuellaInversaEnro);
+		
+		EndDialog (0);
+	end;
+};
+
+procedure [client] main ()
+begin
+
+	% Inicializa variables de salida
+	ouErrCode = -1;
+	ouErrDesc = "Error -1: No ejecutado";
+	ouAuditoria = "S/A";
+
+	% Formatear RUT
+	liLargo = Length(inRut);
+	lsDV = Mid(inRut, liLargo-1, 1);
+	lsRut = Mid(inRut, 0, liLargo-2);
+	lsRut = string (integer(lsRut) "%.010d"),"-",lsDV;
+
+	% Consultar por los datos asociados a "lsRut"
+	User.Pais = inPais;
+	User.Rut = lsRut;
+	Sys.WSConsulta();      
+	
+	if (Sys.erc = 0) then
+	begin
+		User.Nombre = User.Nombre;
+		User.FechaNac = inFechaNac;
+		
+%		liErrCodeEnrola = Dialog(DlgEnrolar);
+		User.Enrolar(1);
+		
+		if (Sys.erc = 0) then
+		begin
+%			ssPais = inPais;
+%			ssRut = lsRut;
+%			siDedo = liDedo;
+%			sbPatron = lbPatronEnro;
+%			sbWsqHuellaEnro = lbWsqHuellaEnro;
+%			ReEnrolarDedo();
+%			if (Sys.erc <> 0) then msgbox "Error: ",string(Sys.erc)," - detalle: ",Sys.ercText;
+			lsReEnrolado = "RE-ENROLADO";
+		end
+		else
+			lsReEnrolado = Sys.ercText;
+	end
+	else
+	begin
+		lsReEnrolado = "El RUT: ",User.Rut,", *** NO SE ENCUENTRA REGISTRADO. ***";
+		msgbox lsReEnrolado;
+	end;
+
+	ouErrCode = Sys.erc;
+	ouErrDesc = Sys.ercText;
+	
+	% Auditoria
+	Audita();
+	
+	% Log
+	Log();
+	
+	% Resultado auditoría
+	ouAuditoria = Audit.Key;
+		
+end;

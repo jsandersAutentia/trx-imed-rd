@@ -1,0 +1,172 @@
+%===================================================%
+%
+% Transacción: jsa_elimina_identidad.atx
+% Autor			: Jorge F. Sanders A.
+% Fecha		: 31/01/2018 - 09:18
+% Propósito	: Procedimiento que elimina "Identidad" en la 
+%					  tabla TIdentidad.
+%
+%===================================================%
+
+% Parámetros de Entrada
+%-----------------------------------------------------------------------------
+input { string inRut, inPais; };
+
+% Parámetros de Salida
+output { integer ouErrCode; string ouErrDesc, ouAuditoria; };
+
+global [shared]
+{
+	string shsSQL,  shsRUT, shsUbicacionSensor;
+	boolean shbAdminOper;
+};
+
+% Permisos
+procedure [Server] Permisos()
+begin
+
+	% Es Admin u Oper?
+%	shbAdminOper = Sesion.OperIsAdmin() or Sesion.OperIn("Oper");
+	shbAdminOper = true;
+	
+end;
+
+% Ubicación del Sensor
+procedure [server] UbicacionSensor()
+begin
+
+	TSensor.NroSerie = Sesion.Sensor;
+	TSensor.Find ();   
+	shsUbicacionSensor = TSensor.Ubicacion;
+	
+end;
+
+% Grabar Auditoría
+procedure [Server] GrabaAuditoria()
+begin
+
+	% Fecha registro
+	Sys.DateTime = DateTime(1);
+	
+	% Establecer ubicación del Sensor utilizado
+	shsUbicacionSensor = "0";
+	UbicacionSensor();
+
+	% Antecedentes de la sesión
+	Audit.AddField( "NroSesion", Sesion.NroSesion );
+	Audit.AddField( "RutOper", Sesion.RutOper );
+	Audit.AddField( "NombreOper", Sesion.NombreOper );
+	Audit.AddField( "Institucion", Sesion.Institucion );
+	Audit.AddField( "Estacion", Sesion.Estacion );
+	Audit.AddField( "Sensor", Sesion.Sensor );
+	Audit.AddField( "Ubicacion", shsUbicacionSensor);
+
+	
+	% Antecedentes de la versión de Autentia en Cliente
+	Audit.AddField( "VerAutentia", Sys.Version );
+	
+	% Hora local PC-Cliente
+	Audit.AddField( "DateTimeCli", Sys.DateTime );
+	
+	% Grabar
+	Audit.Write();
+	
+end;
+
+% Grabar LOG
+procedure [Server] GrabaLog()
+begin
+
+	% Fecha registro
+	Sys.DateTime = DateTime(1);
+
+	% Registro mínimos de Log
+	Log.Pais = "CHILE";
+	Log.Rut = Sesion.RutOper;
+	Log.Institucion = Sesion.Institucion;
+
+	% Grabar
+	Log.Write ();
+	
+end;
+
+% Auditoría
+procedure [Client] Auditoria()
+begin
+	
+	% Registro mínimos
+	Audit.Init ();
+	Audit.Origen = "Trx: jsa_registra_identidad";
+	Audit.Resultado = string(Server.Erc "%.004d"), "-", string(Server.ercDetail);
+	Audit.Descripcion = "Registro de Identidad asociada a un RUT autogenerado.";
+	if (Server.erc <> 0) then
+	  Audit.AddField("ErcText: ", Server.ErcText);
+	  
+	GrabaAuditoria();
+	
+end;
+
+% Log
+procedure [Client] Log()
+begin
+
+	Log.TipoOperacion = "Registro de Identidad asociada a RUT autogenerado.";
+	Log.Resultado = string(Server.Erc  "%.04d");
+	Log.Descripcion = "Trx: jsa_registra_identidad - AuditKey: ", Audit.Key;
+	if (Server.Erc <> 0) then Log.Descripcion   = Log.Descripcion, " - Error: ", Server.ercText;
+	
+	GrabaLog ();
+	
+end;
+
+% Elimina idetidad
+procedure [server] EliminaIdentidad()
+begin
+
+	% Conectarse al BB.DD.
+	Server.erc = -1;
+	Server.ercText = "Error presunto";
+	Sql [0] Open "autentia" at "base.autentia.cl" as "autentia/_voyager.";
+	
+	if (Server.erc = 0) then begin
+		Sql [0] shsSQL;
+
+		% Cerrar
+		Sql [0] CLOSE;
+	end;
+
+end;
+
+procedure main()
+begin
+	
+	% Inicializa control de errores
+	ouErrCode = 0;
+	ouErrDesc = "Resultado sin errores";
+
+	% Tiene permisos?
+	Permisos();
+	if not shbAdminOper then
+	begin
+		ouErrCode = -1;
+		ouErrDesc = "Sin permisos de operar transacción.";
+		Return;
+	end;
+	
+	% Insertar en TIdentidad
+	shsSQL =  "DELETE from TIdentidad WHERE RUT =  '", inRut, "'  and Pais = '", inPais, "';";
+	EliminaIdentidad();
+	
+	% Auditoría
+	Auditoria();
+	ouAuditoria = Audit.Key;
+	
+	% Log
+	Log();
+	
+	if (Server.erc <> 0) then begin
+		ouErrCode = Server.erc;
+		ouErrDesc = Server.ercText;
+	end;
+	
+end;

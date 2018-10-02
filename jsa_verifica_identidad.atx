@@ -1,0 +1,58 @@
+%===================================================%
+%
+% Transacción	: jsa_verifica_identidad.atx
+% Autor			: Jorge F. Sanders A.
+% Fecha			: 19/02/2018 - 15:45
+% Propósito		: Procedimiento que verifica "Identidad" en la tabla TIdentidad.
+%
+%===================================================%
+
+% Parámetros de Entrada y Salida
+input { string inNroDocto, inTpoDocto, inPais; };
+output { integer ouErrCode; string ouErrDesc, ouRUT; };
+
+global [shared]
+{
+	string shsSQL, shsRUT;
+};
+
+procedure [server] VerificaIdentidad()
+begin
+
+	% Conectarse al BB.DD.
+	Server.erc = -1;
+	Server.ercText = "Error presunto";
+	Sql [0] Open "autentia" at "base.autentia.cl" as "autentia/_voyager.";
+	
+	if (Server.erc = 0) then begin
+		% Ejecutar comando SQL
+		Sql [0] SELECT shsSQL INTO shsRUT;
+
+		% Cerrar
+		Sql [0] CLOSE;
+	end;
+
+end;
+
+procedure main()
+begin
+	
+	% Inicializa control de errores
+	ouErrCode = 0;
+	ouErrDesc = "Resultado sin errores";
+	ouRUT = "";
+	
+	% Verificar en TIdentidad
+	shsSQL =  " RUT from TIdentidad where Pais = '", inPais, "' and NroDocto = '", inNroDocto, "' and TipoDocto = '", inTpoDocto, "';";
+	VerificaIdentidad();
+
+	% Asigna RUT encontrado
+	if (shsRUT <> "") then
+	  ouRUT = shsRUT;
+	
+	if (Server.erc <> 0) then begin
+		ouErrCode = Server.erc;
+		ouErrDesc = Server.ercText;
+	end;
+	
+end;

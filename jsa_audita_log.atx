@@ -1,0 +1,50 @@
+
+procedure [server] GrabaAuditoria ()
+begin
+	Sys.DateTime = DateTime (1);
+	Audit.Write ();
+end;
+
+procedure [server] GrabaLog ()
+begin
+	Sys.DateTime = DateTime (1);
+	Log.Write ();
+end;
+
+procedure [client] Audita ()
+begin
+	User.Dedo.wsq = WSQ (User.Dedo.Huella);
+
+	Audit.Init ();
+	Audit.Origen = lsOrigen;
+	Audit.Resultado = string(Sys.erc "%.004d");
+	Audit.Descripcion = "Rut: ",User.Rut;
+	Audit.Version = lsVersion;
+	Audit.AddField ( "Rut", User.Rut );
+	Audit.AddField ( "Nombre", User.Nombre );
+	Audit.AddField ( "RutOper", Sesion.RutOper );
+	Audit.AddField ( "NombreOper", Sesion.NombreOper );
+	Audit.AddField ( "Dedo.Fecha", User.Dedo.Fecha );
+	Audit.AddField ( "Dedo.inx", User.Dedo.inx );
+	Audit.AddField ( "Dedo.id", User.Dedo.id );
+	Audit.AddField ( "Dedo.wsq", User.Dedo.wsq );
+	Audit.AddField ( "Dedo.Enrolador", User.Dedo.Enrolador.Institucion );
+	Audit.AddField ( "Institucion", Sesion.Institucion );
+	
+	GrabaAuditoria ();
+end;
+
+procedure [client] Log()
+begin
+	Log.Pais = User.Pais;
+	Log.Rut = User.Rut;
+	Log.Institucion = Sesion.Institucion;
+	Log.TipoOperacion = lsTipoOperacion;
+
+	% Operación llevada a cabo
+	Log.Descripcion = "JSA-Verificacion: ", if (lnErcVerifica = 0) then "APROBADA" else "RECHAZADA";
+
+	Log.Resultado = string(lnErcVerifica "%.04d");
+
+	GrabaLog ();
+end;
